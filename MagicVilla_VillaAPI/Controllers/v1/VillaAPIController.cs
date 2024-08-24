@@ -31,11 +31,11 @@ namespace MagicVilla_VillaAPI.Controllers.v1
 
 
         [HttpGet]
-        [ResponseCache(CacheProfileName = "Default30")]
+        //[ResponseCache(CacheProfileName = "Default30")]
         [ProducesResponseType(StatusCodes.Status403Forbidden)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         [ProducesResponseType(StatusCodes.Status200OK)]
-        public async Task<ActionResult<APIResponse>> GetVillas([FromQuery(Name ="filterOccupancy")]int? occupancy,
+        public async Task<ActionResult<APIResponse>> GetVillas([FromQuery(Name = "filterOccupancy")] int? occupancy,
             [FromQuery] string? search, int pageSize = 0, int pageNumber = 1)
         {
             try
@@ -45,8 +45,8 @@ namespace MagicVilla_VillaAPI.Controllers.v1
 
                 if (occupancy > 0)
                 {
-                    villaList = await _dbVilla.GetAllAsync(u => u.Occupancy == occupancy, pageSize:pageSize,
-                        pageNumber:pageNumber);
+                    villaList = await _dbVilla.GetAllAsync(u => u.Occupancy == occupancy, pageSize: pageSize,
+                        pageNumber: pageNumber);
                 }
                 else
                 {
@@ -55,7 +55,7 @@ namespace MagicVilla_VillaAPI.Controllers.v1
                 }
                 if (!string.IsNullOrEmpty(search))
                 {
-                    villaList = villaList.Where(u=>u.Name.ToLower().Contains(search));
+                    villaList = villaList.Where(u => u.Name.ToLower().Contains(search));
                 }
                 Pagination pagination = new() { PageNumber = pageNumber, PageSize = pageSize };
 
@@ -82,7 +82,7 @@ namespace MagicVilla_VillaAPI.Controllers.v1
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         //[ProducesResponseType(200, Type =typeof(VillaDTO))]
-//        [ResponseCache(Location =ResponseCacheLocation.None,NoStore =true)]
+        //        [ResponseCache(Location =ResponseCacheLocation.None,NoStore =true)]
         public async Task<ActionResult<APIResponse>> GetVilla(int id)
         {
             try
