@@ -40,10 +40,11 @@ namespace MagicVilla_Web.Controllers
 
                 var handler = new JwtSecurityTokenHandler();
                 var jwt = handler.ReadJwtToken(model.AccessToken);
-
+                var nameClaim = jwt.Claims.FirstOrDefault(u => u.Type == "name");
+                var roleClaim = jwt.Claims.FirstOrDefault(u => u.Type == "role");
                 var identity = new ClaimsIdentity(CookieAuthenticationDefaults.AuthenticationScheme);
-                identity.AddClaim(new Claim(ClaimTypes.Name, jwt.Claims.FirstOrDefault(u => u.Type == "name").Value));
-                identity.AddClaim(new Claim(ClaimTypes.Role, jwt.Claims.FirstOrDefault(u => u.Type == "role").Value));
+                identity.AddClaim(new Claim(ClaimTypes.Name, nameClaim?.Value ?? ""));
+                identity.AddClaim(new Claim(ClaimTypes.Role, roleClaim?.Value ?? ""));
                 var principal = new ClaimsPrincipal(identity);
                 await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
 
