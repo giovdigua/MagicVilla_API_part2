@@ -1,6 +1,9 @@
-﻿using MagicVilla_Utility;
+﻿using AutoMapper.Internal;
+using MagicVilla_Utility;
 using MagicVilla_Web.Models;
+using MagicVilla_Web.Models.Dto;
 using MagicVilla_Web.Services.IServices;
+using Microsoft.AspNetCore.Authentication;
 using Newtonsoft.Json;
 using System.Net.Http.Headers;
 using System.Text;
@@ -13,92 +16,98 @@ namespace MagicVilla_Web.Services
         public APIResponse responseModel { get; set; }
         public IHttpClientFactory httpClient { get; set; }
         private readonly ITokenProvider _tokenProvider;
-        public BaseService(IHttpClientFactory httpClient, ITokenProvider tokenProvider)
+        protected readonly string VillaApiUrl;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+        public BaseService(IHttpClientFactory httpClient, ITokenProvider tokenProvider, IConfiguration configuration
+            , IHttpContextAccessor httpContextAccessor)
         {
             this.responseModel = new();
             this.httpClient = httpClient;
+            VillaApiUrl = configuration.GetValue<string>("ServiceUrls:VillaApi");
             _tokenProvider = tokenProvider;
+            _httpContextAccessor = httpContextAccessor;
         }
+
         public async Task<T> SendAsync<T>(APIRequest apiRequest, bool withBearer = true)
         {
             try
             {
                 var client = httpClient.CreateClient("MagicAPI");
-                HttpRequestMessage message = new HttpRequestMessage();
-                if (apiRequest.ContentType == ContentType.MultipartFormData)
+                var messageFactory = () =>
                 {
-                    message.Headers.Add("Accept", "*/*");
-                }
-                else
-                {
-                    message.Headers.Add("Accept", "application/json");
-                }
 
-                message.RequestUri = new Uri(apiRequest.Url);
-
-                if (withBearer && _tokenProvider.GetToken() != null)
-                {
-                    var token = _tokenProvider.GetToken();
-                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
-                }
-
-                if (apiRequest.ContentType == ContentType.MultipartFormData)
-                {
-                    var content = new MultipartFormDataContent();
-
-                    foreach (var prop in apiRequest.Data.GetType().GetProperties())
+                    HttpRequestMessage message = new();
+                    if (apiRequest.ContentType == ContentType.MultipartFormData)
                     {
-                        var value = prop.GetValue(apiRequest.Data);
-                        if (value is FormFile)
+                        message.Headers.Add("Accept", "*/*");
+                    }
+                    else
+                    {
+                        message.Headers.Add("Accept", "application/json");
+                    }
+
+                    message.RequestUri = new Uri(apiRequest.Url);
+
+                    if (withBearer && _tokenProvider.GetToken() != null)
+                    {
+                        var token = _tokenProvider.GetToken();
+                        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
+                    }
+
+                    if (apiRequest.ContentType == ContentType.MultipartFormData)
+                    {
+                        var content = new MultipartFormDataContent();
+
+                        foreach (var prop in apiRequest.Data.GetType().GetProperties())
                         {
-                            var file = (FormFile)value;
-                            if (file != null)
+                            var value = prop.GetValue(apiRequest.Data);
+                            if (value is FormFile)
                             {
-                                content.Add(new StreamContent(file.OpenReadStream()), prop.Name, file.FileName);
+                                var file = (FormFile)value;
+                                if (file != null)
+                                {
+                                    content.Add(new StreamContent(file.OpenReadStream()), prop.Name, file.FileName);
+                                }
+                            }
+                            else
+                            {
+                                content.Add(new StringContent(value == null ? "" : value.ToString()), prop.Name);
                             }
                         }
-                        else
+
+                        message.Content = content;
+                    }
+                    else
+                    {
+                        if (apiRequest.Data != null)
                         {
-                            content.Add(new StringContent(value == null ? "" : value.ToString()), prop.Name);
+                            message.Content = new StringContent(JsonConvert.SerializeObject(apiRequest.Data),
+                                Encoding.UTF8, "application/json");
                         }
                     }
 
-                    message.Content = content;
-                }
-                else
-                {
-                    if (apiRequest.Data != null)
+                    switch (apiRequest.ApiType)
                     {
-                        message.Content = new StringContent(JsonConvert.SerializeObject(apiRequest.Data),
-                            Encoding.UTF8, "application/json");
+                        case SD.ApiType.POST:
+                            message.Method = HttpMethod.Post;
+                            break;
+                        case SD.ApiType.PUT:
+                            message.Method = HttpMethod.Put;
+                            break;
+                        case SD.ApiType.DELETE:
+                            message.Method = HttpMethod.Delete;
+                            break;
+                        default:
+                            message.Method = HttpMethod.Get;
+                            break;
+
                     }
-                }
-
-                switch (apiRequest.ApiType)
-                {
-                    case SD.ApiType.POST:
-                        message.Method = HttpMethod.Post;
-                        break;
-                    case SD.ApiType.PUT:
-                        message.Method = HttpMethod.Put;
-                        break;
-                    case SD.ApiType.DELETE:
-                        message.Method = HttpMethod.Delete;
-                        break;
-                    default:
-                        message.Method = HttpMethod.Get;
-                        break;
-
-                }
+                    return message;
+                };
 
                 HttpResponseMessage apiResponse = null;
 
-                if (!string.IsNullOrEmpty(apiRequest.Token))
-                {
-                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiRequest.Token);
-                }
-
-                apiResponse = await client.SendAsync(message);
+                apiResponse = await SendWithRefreshTokenAsync(client, messageFactory, withBearer);
 
                 var apiContent = await apiResponse.Content.ReadAsStringAsync();
                 try
@@ -133,6 +142,78 @@ namespace MagicVilla_Web.Services
                 var res = JsonConvert.SerializeObject(dto);
                 var APIResponse = JsonConvert.DeserializeObject<T>(res);
                 return APIResponse;
+            }
+        }
+
+        private async Task<HttpResponseMessage> SendWithRefreshTokenAsync(HttpClient httpClient,
+            Func<HttpRequestMessage> httpRequestMessageFactory, bool withBearer = true)
+        {
+            if (!withBearer)
+            {
+                return await httpClient.SendAsync(httpRequestMessageFactory());
+            }
+            else
+            {
+                TokenDTO tokenDTO = _tokenProvider.GetToken();
+                if (tokenDTO != null && !string.IsNullOrEmpty(tokenDTO.AccessToken))
+                {
+
+                    httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenDTO.AccessToken);
+                }
+
+                try
+                {
+                    var response = await httpClient.SendAsync(httpRequestMessageFactory());
+                    if (response.IsSuccessStatusCode)
+                    {
+                        return response;
+                    }
+                    // IF this fails then we can pass refresh token
+                    return response;
+                    {
+
+                    }
+                }
+                catch (Exception e)
+                {
+                    throw;
+                }
+            }
+
+        }
+
+        private async Task InvokeRefreshTokenEndpoint(HttpClient httpClient, string existingAccessToken, string existingRefreshToken)
+        {
+            HttpRequestMessage message = new();
+            message.Headers.Add("Accept", "application/json");
+            message.RequestUri = new Uri($"{VillaApiUrl}/api/{SD.CurrentAPIVersion}/UserAuth/refresh");
+            message.Method = HttpMethod.Post;
+            message.Content = new StringContent(JsonConvert.SerializeObject(new TokenDTO()
+            {
+                AccessToken = existingAccessToken,
+                RefreshToken = existingRefreshToken
+            }), Encoding.UTF8, "application/json");
+
+            var response = await httpClient.SendAsync(message);
+            var content = await response.Content.ReadAsStringAsync();
+            var apiResponse = JsonConvert.DeserializeObject<APIResponse>(content);
+
+            if (apiResponse?.IsSuccess != null)
+            {
+                await _httpContextAccessor.HttpContext.SignOutAsync();
+                _tokenProvider.ClearToken();
+            }
+            else
+            {
+                var tokenDataStr = JsonConvert.SerializeObject(apiResponse.Result);
+                var tokenDto = JsonConvert.DeserializeObject<TokenDTO>(tokenDataStr);
+
+                if (tokenDto != null && !string.IsNullOrEmpty(tokenDto.AccessToken)) 
+                {
+                    // New method to sign in with new token that we receive
+                    httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenDTO.AccessToken);
+
+                }
             }
         }
     }
