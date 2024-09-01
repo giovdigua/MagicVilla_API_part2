@@ -7,15 +7,17 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
-using Microsoft.OpenApi.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Identity;
 using MagicVilla_VillaAPI.Models;
+using Microsoft.Extensions.Options;
+using Swashbuckle.AspNetCore.SwaggerGen;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddDbContext<ApplicationDbContext>(option => {
+builder.Services.AddDbContext<ApplicationDbContext>(option =>
+{
     option.UseSqlServer(builder.Configuration.GetConnectionString("DefaultSQLConnection"));
 });
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
@@ -25,7 +27,8 @@ builder.Services.AddScoped<IVillaRepository, VillaRepository>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IVillaNumberRepository, VillaNumberRepository>();
 builder.Services.AddAutoMapper(typeof(MappingConfig));
-builder.Services.AddApiVersioning(options => {
+builder.Services.AddApiVersioning(options =>
+{
     options.AssumeDefaultVersionWhenUnspecified = true;
     options.DefaultApiVersion = new ApiVersion(1, 0);
     options.ReportApiVersions = true;
@@ -44,20 +47,25 @@ builder.Services.AddAuthentication(x =>
     x.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
     x.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
 })
-    .AddJwtBearer(x => {
+    .AddJwtBearer(x =>
+    {
         x.RequireHttpsMetadata = false;
         x.SaveToken = true;
         x.TokenValidationParameters = new TokenValidationParameters
         {
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(key)),
-                ValidateIssuer = false,
-                ValidateAudience = false,
-                ClockSkew = TimeSpan.Zero,
-            };
-});
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(key)),
+            ValidateIssuer = true,
+            ValidIssuer = "https://magicvilla-api.com",
+            //ValidAudience = "https://test-magic-api.com",
+            ValidAudience = "dotnetmastery.com",
+            ValidateAudience = true,
+            ClockSkew = TimeSpan.Zero,
+        };
+    });
 
-builder.Services.AddControllers(option => {
+builder.Services.AddControllers(option =>
+{
     //option.CacheProfiles.Add("Default30",
     //   new CacheProfile()
     //   {
@@ -67,76 +75,16 @@ builder.Services.AddControllers(option => {
 }).AddNewtonsoftJson().AddXmlDataContractSerializerFormatters();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options => {
-    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        Description =
-            "JWT Authorization header using the Bearer scheme. \r\n\r\n " +
-            "Enter 'Bearer' [space] and then your token in the text input below.\r\n\r\n" +
-            "Example: \"Bearer 12345abcdef\"",
-        Name = "Authorization",
-        In = ParameterLocation.Header,
-        Scheme = "Bearer"
-    });
-    options.AddSecurityRequirement(new OpenApiSecurityRequirement()
-    {
-        {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
-                            {
-                                Type = ReferenceType.SecurityScheme,
-                                Id = "Bearer"
-                            },
-                Scheme = "oauth2",
-                Name = "Bearer",
-                In = ParameterLocation.Header
-            },
-            new List<string>()
-        }
-    });
-    options.SwaggerDoc("v1", new OpenApiInfo
-    {
-        Version = "v1.0",
-        Title = "Magic Villa V1",
-        Description = "API to manage Villa",
-        TermsOfService = new Uri("https://example.com/terms"),
-        Contact = new OpenApiContact
-        {
-            Name = "Dotnetmastery",
-            Url = new Uri("https://dotnetmastery.com")
-        },
-        License = new OpenApiLicense
-        {
-            Name = "Example License",
-            Url = new Uri("https://example.com/license")
-        }
-    });
-    options.SwaggerDoc("v2", new OpenApiInfo
-    {
-        Version = "v2.0",
-        Title = "Magic Villa V2",
-        Description = "API to manage Villa",
-        TermsOfService = new Uri("https://example.com/terms"),
-        Contact = new OpenApiContact
-        {
-            Name = "Dotnetmastery",
-            Url = new Uri("https://dotnetmastery.com")
-        },
-        License = new OpenApiLicense
-        {
-            Name = "Example License",
-            Url = new Uri("https://example.com/license")
-        }
-    });
-});
+builder.Services.AddTransient<IConfigureOptions<SwaggerGenOptions>, ConfigureSwaggerOptions>();
+builder.Services.AddSwaggerGen();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI(options => {
+    app.UseSwaggerUI(options =>
+    {
         options.SwaggerEndpoint("/swagger/v2/swagger.json", "Magic_VillaV2");
         options.SwaggerEndpoint("/swagger/v1/swagger.json", "Magic_VillaV1");
     });
@@ -148,5 +96,18 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-
+ApplyMigration();
 app.Run();
+
+void ApplyMigration()
+{
+    using (var scope = app.Services.CreateScope())
+    {
+        var _db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        if (_db.Database.GetPendingMigrations().Count() > 0)
+        {
+            _db.Database.Migrate();
+        }
+    }
+}
