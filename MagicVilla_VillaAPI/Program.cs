@@ -12,6 +12,11 @@ using Microsoft.AspNetCore.Identity;
 using MagicVilla_VillaAPI.Models;
 using Microsoft.Extensions.Options;
 using Swashbuckle.AspNetCore.SwaggerGen;
+using MagicVilla_VillaAPI.Filters;
+using Microsoft.AspNetCore.Diagnostics;
+using Newtonsoft.Json;
+using MagicVilla_VillaAPI.Extensions;
+using MagicVilla_VillaAPI.Middlewares;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -66,13 +71,15 @@ builder.Services.AddAuthentication(x =>
 
 builder.Services.AddControllers(option =>
 {
-    //option.CacheProfiles.Add("Default30",
-    //   new CacheProfile()
-    //   {
-    //       Duration = 30
-    //   });
-    //option.ReturnHttpNotAcceptable=true;
-}).AddNewtonsoftJson().AddXmlDataContractSerializerFormatters();
+    option.Filters.Add<CustomExceptionFilter>();
+}).AddNewtonsoftJson().AddXmlDataContractSerializerFormatters().
+ConfigureApiBehaviorOptions(option =>
+{
+    option.ClientErrorMapping[StatusCodes.Status500InternalServerError] = new ClientErrorData
+    {
+        Link = "https://dotnetmastery/500"
+    };
+});
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddTransient<IConfigureOptions<SwaggerGenOptions>, ConfigureSwaggerOptions>();
@@ -90,6 +97,10 @@ if (app.Environment.IsDevelopment())
     });
 }
 
+//app.UseExceptionHandler("/ErrorHandling/ProcessError");
+
+//app.HandleError(app.Environment.IsDevelopment());   
+app.UseMiddleware<CustomExceptionMiddleware>();
 app.UseStaticFiles();
 app.UseHttpsRedirection();
 app.UseAuthentication();
